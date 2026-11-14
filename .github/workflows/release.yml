@@ -1,0 +1,22 @@
+# Creates a GitHub release from conventional commits using the
+# health-informatics-uon/workflows semantic-release reusable workflow.
+# No container or PyPI publishing: this repo ships neither a Dockerfile nor a package.
+
+name: Release
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    uses: health-informatics-uon/workflows/.github/workflows/semantic-release.yml@6411293719f0d3fc7fddb74530d4435333460e4f # v 1.4.1
+    with:
+      node-version: "24"
+    secrets: inherit
