@@ -28,7 +28,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: read
-      id-token: write
 
     steps:
       # Lines changed come straight from the event payload, so no API call is needed.
@@ -66,6 +65,8 @@ jobs:
         if: steps.size.outputs.too-large == 'false'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Post as github-actions[bot] using the built-in token instead of the Claude GitHub App.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-plugins-official.git"
           plugins: "code-review@claude-plugins-official"
           prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
