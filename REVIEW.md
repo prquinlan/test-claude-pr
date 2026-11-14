@@ -9,9 +9,12 @@ Used by the automated Claude PR review (`.github/workflows/claude-pr-review.yml`
 - Race conditions: shared state or files touched concurrently without locking, check-then-act bugs.
 - GitHub Actions: secrets or `${{ }}` untrusted input interpolated directly into `run:` scripts,
   overly broad `permissions`, third-party actions not pinned to a commit SHA.
-- Where a dependabot alert could be merged in
 
 ## Don't flag
 - Formatting or naming preferences.
 - Missing comments or docstrings.
 - Suggestions to refactor working code without a concrete defect.
+
+## Also mention (in the PR comment, not inline)
+- Open Dependabot PRs (`gh pr list --author app/dependabot`) that could be merged alongside
+  this one, e.g. bumps to the same files or dependencies. List each by number and title.
