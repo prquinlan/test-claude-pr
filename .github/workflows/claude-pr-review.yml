@@ -30,28 +30,40 @@ jobs:
       issues: read
       id-token: write
 
-    env:
-      MAX_LINES: 1000
-      # Lines changed come straight from the event payload, so no API call is needed.
-      PR_LINES: ${{ github.event.pull_request.additions + github.event.pull_request.deletions }}
-
     steps:
+      # Lines changed come straight from the event payload, so no API call is needed.
+      - name: Check PR size
+        id: size
+        env:
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
+          MAX_LINES: 1000
+        run: |
+          lines=$((ADDITIONS + DELETIONS))
+          echo "lines=$lines" >> "$GITHUB_OUTPUT"
+          if [ "$lines" -gt "$MAX_LINES" ]; then
+            echo "too-large=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "too-large=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Comment if PR is too large
-        if: fromJSON(env.PR_LINES) > fromJSON(env.MAX_LINES)
+        if: steps.size.outputs.too-large == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          LINES: ${{ steps.size.outputs.lines }}
         run: |
           gh pr comment "$PR_URL" \
-            --body "PR too large for automated review (${PR_LINES} lines changed, limit ${MAX_LINES}). Consider splitting it up."
+            --body "PR too large for automated review (${LINES} lines changed, limit 1000). Consider splitting it up."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: fromJSON(env.PR_LINES) <= fromJSON(env.MAX_LINES)
+        if: steps.size.outputs.too-large == 'false'
         with:
           fetch-depth: 1
 
       - uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
-        if: fromJSON(env.PR_LINES) <= fromJSON(env.MAX_LINES)
+        if: steps.size.outputs.too-large == 'false'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-plugins-official.git"
