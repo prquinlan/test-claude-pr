@@ -11,7 +11,7 @@ permissions:
 # Cancel older in-progress runs if new commits are pushed to the same PR
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   review:
@@ -19,8 +19,7 @@ jobs:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       !github.event.pull_request.draft &&
-      github.actor != 'dependabot[bot]' &&
-      !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -39,14 +38,11 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Review this pull request against the standards in REVIEW.md (and CLAUDE.md, if present).
             Use `gh pr view` and `gh pr diff` to see what changed; read surrounding files only as needed.
-
-            Focus strictly on high-signal issues: logic bugs, security vulnerabilities,
-            race conditions, and missing error handling. Ignore style nits.
+            Review it against REVIEW.md (and CLAUDE.md, if present).
 
             Post concise, actionable inline comments on the specific lines involved.
-            If you find nothing worth flagging, post a single PR comment with `gh pr comment`
+            If nothing is worth flagging, post a single PR comment with `gh pr comment`
             saying the review found no issues, so it is clear the review ran.
           claude_args: >-
             --model claude-sonnet-5-5
