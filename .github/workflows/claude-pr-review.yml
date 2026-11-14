@@ -1,0 +1,86 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write # Allows posting review comments; contents: read blocks pushes
+
+# Cancel older in-progress runs if new commits are pushed to the same PR
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip drafts, forks (no secrets) and Dependabot (no secrets)
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Skip the review for PRs over MAX_LINES changed lines (additions + deletions).
+      # Lines changed come straight from the event payload, so no API call is needed.
+      - name: Check PR size
+        id: size
+        env:
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
+          MAX_LINES: 1000
+        run: |
+          lines=$((ADDITIONS + DELETIONS))
+          echo "lines=$lines" >> "$GITHUB_OUTPUT"
+          if [ "$lines" -gt "$MAX_LINES" ]; then
+            echo "too-large=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "too-large=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Comment once per PR, not on every push, by looking for a hidden marker.
+      - name: Comment if PR is too large
+        if: steps.size.outputs.too-large == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          LINES: ${{ steps.size.outputs.lines }}
+        run: |
+          marker="<!-- claude-review-too-large -->"
+          if gh pr view "$PR_URL" --json comments -q '.comments[].body' | grep -qF "$marker"; then
+            echo "Too-large comment already posted; skipping review."
+            exit 0
+          fi
+          gh pr comment "$PR_URL" --body "$marker
+          PR too large for automated review (${LINES} lines changed, limit 1000). Consider splitting it up."
+
+      - name: Checkout PR code
+        if: steps.size.outputs.too-large == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        if: steps.size.outputs.too-large == 'false'
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Use `gh pr view` and `gh pr diff` to see what changed; read surrounding files only as needed.
+            Review it against REVIEW.md (and CLAUDE.md, if present).
+
+            Post concise, actionable inline comments on the specific lines involved.
+            Then post one PR comment with `gh pr comment` containing any PR-level notes
+            REVIEW.md asks for; if there are no inline findings, say so in that comment
+            so it is clear the review ran.
+          claude_args: >-
+            --model claude-sonnet-5-5
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
