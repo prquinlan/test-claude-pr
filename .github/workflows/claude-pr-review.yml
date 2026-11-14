@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   review:
-    # Skip drafts, forks (no secrets), Dependabot (no secrets), and PRs labelled skip-ai-review
+    # Skip drafts, forks (no secrets) and Dependabot (no secrets)
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       !github.event.pull_request.draft &&
