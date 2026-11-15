@@ -62,20 +62,24 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          # Don't leave the GitHub token in .git/config, where Claude could read it.
+          persist-credentials: false
 
       # Runs the Claude Code CLI directly rather than anthropics/claude-code-action:
       # with an API key, the action's requests were rejected with "Credit balance is
       # too low" even though the same key works when called directly.
-      - name: Use trusted Claude config from the base branch
+      - name: Use trusted review config from the base branch
         if: steps.size.outputs.too-large == 'false'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # The PR head is untrusted: never let it supply Claude settings, hooks,
-          # MCP servers or instructions. Replace them with the base branch's copies.
-          paths=".claude .claude.json .mcp.json CLAUDE.md CLAUDE.local.md"
+          # MCP servers, instructions or review standards. Use the base branch's copies.
+          paths=".claude .claude.json .mcp.json CLAUDE.md CLAUDE.local.md REVIEW.md"
           rm -rf $paths
-          git fetch --depth 1 origin "$BASE_REF"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch --depth 1 origin "$BASE_REF"
           for p in $paths; do
             git checkout FETCH_HEAD -- "$p" 2>/dev/null || true
           done
@@ -84,7 +88,56 @@ jobs:
         if: steps.size.outputs.too-large == 'false'
         run: npm install -g @anthropic-ai/claude-code@2.1.325
 
+      # Claude can only read. It returns findings as JSON; the next step posts them.
       - name: Run Claude Code Review
+        if: steps.size.outputs.too-large == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          schema='{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"body":{"type":"string"}},"required":["path","line","body"]}},"summary":{"type":"string"}},"required":["findings","summary"]}'
+
+          prompt=$(cat <<EOF
+          REPO: ${REPO}
+          PR NUMBER: ${PR_NUMBER}
+
+          Use "gh pr view ${PR_NUMBER}" and "gh pr diff ${PR_NUMBER}" to see what changed;
+          read surrounding files only as needed.
+          Review it against REVIEW.md (and CLAUDE.md, if present).
+
+          Do not post anything yourself. Return:
+          - findings: one entry per issue, with the file path, the line number in the new
+            version of the file (it must be a line inside the diff), and a concise,
+            actionable comment.
+          - summary: the PR-level notes REVIEW.md asks for. If there are no findings,
+            say so, so it is clear the review ran.
+          EOF
+          )
+
+          # Deny reads outside the checkout: environment variables (/proc), system and
+          # temp files, and hidden config directories in the home folder.
+          deny="Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(//tmp/**),Read(//run/**),Read(//var/**),Read(~/.*/**)"
+
+          claude -p "$prompt" \
+            --model claude-sonnet-5-5 \
+            --max-turns 15 \
+            --output-format json \
+            --json-schema "$schema" \
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*)" \
+            --disallowedTools "$deny" \
+            > "$RUNNER_TEMP/review.json"
+
+          jq '{is_error, num_turns, total_cost_usd, permission_denials}' "$RUNNER_TEMP/review.json"
+          if [ "$(jq -r '.is_error' "$RUNNER_TEMP/review.json")" != "false" ] \
+             || [ "$(jq -r '.structured_output | type' "$RUNNER_TEMP/review.json")" != "object" ]; then
+            echo "::error::Claude review did not complete"
+            jq -r '.result // empty' "$RUNNER_TEMP/review.json"
+            exit 1
+          fi
+
+      - name: Post review comments
         if: steps.size.outputs.too-large == 'false'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -93,32 +146,47 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          comments_api="repos/${REPO}/pulls/${PR_NUMBER}/comments"
+          out="$RUNNER_TEMP/review.json"
 
-          prompt=$(cat <<EOF
-          REPO: ${REPO}
-          PR NUMBER: ${PR_NUMBER}
-          HEAD COMMIT: ${HEAD_SHA}
+          # Refuse to post any text containing a secret, in case the model was tricked
+          # into including one.
+          leaks() {
+            for secret in "$ANTHROPIC_API_KEY" "$GH_TOKEN"; do
+              [ -n "$secret" ] && printf '%s' "$1" | grep -qF -- "$secret" && return 0
+            done
+            return 1
+          }
 
-          Use "gh pr view ${PR_NUMBER}" and "gh pr diff ${PR_NUMBER}" to see what changed;
-          read surrounding files only as needed.
-          Review it against REVIEW.md (and CLAUDE.md, if present).
+          posted=0
+          unanchored=""
+          count=$(jq '.structured_output.findings | length' "$out")
+          for i in $(seq 0 $((count - 1))); do
+            path=$(jq -r ".structured_output.findings[$i].path" "$out")
+            line=$(jq -r ".structured_output.findings[$i].line" "$out")
+            body=$(jq -r ".structured_output.findings[$i].body" "$out")
+            if leaks "$path$body"; then
+              echo "::warning::Dropped a finding that contained a secret"
+              continue
+            fi
+            if printf '%s' "$body" | gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+                 -f commit_id="$HEAD_SHA" -f path="$path" -F line="$line" -f side=RIGHT \
+                 -F body=@- > /dev/null; then
+              posted=$((posted + 1))
+            else
+              # Line not in the diff: keep the finding in the summary instead.
+              unanchored="${unanchored}
+          - \`${path}:${line}\`: ${body}"
+            fi
+          done
 
-          Post each finding as a concise, actionable inline comment on the line involved,
-          using exactly this command shape (the body is read from the heredoc, so any
-          characters are safe in it):
-
-          gh api ${comments_api} -f commit_id=${HEAD_SHA} -f path=FILE_PATH -F line=LINE_NUMBER -f side=RIGHT -F body=@- <<'COMMENT'
-          Your comment text here.
-          COMMENT
-
-          Then post one PR comment with "gh pr comment ${PR_NUMBER} --body-file -" (body via
-          a heredoc the same way) containing any PR-level notes REVIEW.md asks for; if there
-          are no inline findings, say so in that comment so it is clear the review ran.
-          EOF
-          )
-
-          claude -p "$prompt" \
-            --model claude-sonnet-5-5 \
-            --max-turns 15 \
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api ${comments_api}:*)"
+          summary=$(jq -r '.structured_output.summary' "$out")
+          if leaks "$summary"; then
+            echo "::warning::Dropped a summary that contained a secret"
+            summary="(summary withheld: it contained a secret)"
+          fi
+          {
+            printf '**Claude review:** %s inline finding(s).\n\n%s\n' "$posted" "$summary"
+            if [ -n "$unanchored" ]; then
+              printf '\n**Findings that could not be attached to a diff line:**%s\n' "$unanchored"
+            fi
+          } | gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file -
