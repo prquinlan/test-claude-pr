@@ -76,11 +76,11 @@ jobs:
         run: |
           # The PR head is untrusted: never let it supply Claude settings, hooks,
           # MCP servers, instructions or review standards. Use the base branch's copies.
-          paths=".claude .claude.json .mcp.json CLAUDE.md CLAUDE.local.md REVIEW.md"
-          rm -rf $paths
+          paths=(.claude .claude.json .mcp.json CLAUDE.md CLAUDE.local.md REVIEW.md)
+          rm -rf "${paths[@]}"
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch --depth 1 origin "$BASE_REF"
-          for p in $paths; do
+          for p in "${paths[@]}"; do
             git checkout FETCH_HEAD -- "$p" 2>/dev/null || true
           done
 
