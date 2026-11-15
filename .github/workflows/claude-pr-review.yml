@@ -63,25 +63,62 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Runs the Claude Code CLI directly rather than anthropics/claude-code-action:
+      # with an API key, the action's requests were rejected with "Credit balance is
+      # too low" even though the same key works when called directly.
+      - name: Use trusted Claude config from the base branch
+        if: steps.size.outputs.too-large == 'false'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # The PR head is untrusted: never let it supply Claude settings, hooks,
+          # MCP servers or instructions. Replace them with the base branch's copies.
+          paths=".claude .claude.json .mcp.json CLAUDE.md CLAUDE.local.md"
+          rm -rf $paths
+          git fetch --depth 1 origin "$BASE_REF"
+          for p in $paths; do
+            git checkout FETCH_HEAD -- "$p" 2>/dev/null || true
+          done
+
+      - name: Install Claude Code
+        if: steps.size.outputs.too-large == 'false'
+        run: npm install -g @anthropic-ai/claude-code@2.1.325
+
       - name: Run Claude Code Review
         if: steps.size.outputs.too-large == 'false'
-        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          show_full_output: true # TEMPORARY: diagnosing API error; remove after
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          comments_api="repos/${REPO}/pulls/${PR_NUMBER}/comments"
 
-            Use `gh pr view` and `gh pr diff` to see what changed; read surrounding files only as needed.
-            Review it against REVIEW.md (and CLAUDE.md, if present).
+          prompt=$(cat <<EOF
+          REPO: ${REPO}
+          PR NUMBER: ${PR_NUMBER}
+          HEAD COMMIT: ${HEAD_SHA}
 
-            Post concise, actionable inline comments on the specific lines involved.
-            Then post one PR comment with `gh pr comment` containing any PR-level notes
-            REVIEW.md asks for; if there are no inline findings, say so in that comment
-            so it is clear the review ran.
-          claude_args: >-
-            --model claude-sonnet-5-5
-            --max-turns 15
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
+          Use "gh pr view ${PR_NUMBER}" and "gh pr diff ${PR_NUMBER}" to see what changed;
+          read surrounding files only as needed.
+          Review it against REVIEW.md (and CLAUDE.md, if present).
+
+          Post each finding as a concise, actionable inline comment on the line involved,
+          using exactly this command shape (the body is read from the heredoc, so any
+          characters are safe in it):
+
+          gh api ${comments_api} -f commit_id=${HEAD_SHA} -f path=FILE_PATH -F line=LINE_NUMBER -f side=RIGHT -F body=@- <<'COMMENT'
+          Your comment text here.
+          COMMENT
+
+          Then post one PR comment with "gh pr comment ${PR_NUMBER} --body-file -" (body via
+          a heredoc the same way) containing any PR-level notes REVIEW.md asks for; if there
+          are no inline findings, say so in that comment so it is clear the review ran.
+          EOF
+          )
+
+          claude -p "$prompt" \
+            --model claude-sonnet-5-5 \
+            --max-turns 15 \
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api ${comments_api}:*)"
