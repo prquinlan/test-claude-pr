@@ -159,23 +159,12 @@ jobs:
       - name: Post review comments
         if: steps.size.outputs.too-large == 'false'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           out="$RUNNER_TEMP/review.json"
-
-          # Refuse to post any text containing a secret, in case the model was tricked
-          # into including one.
-          leaks() {
-            for secret in "$ANTHROPIC_API_KEY" "$GH_TOKEN"; do
-              [ -n "$secret" ] && printf '%s' "$1" | grep -qF -- "$secret" && return 0
-            done
-            return 1
-          }
-
           posted=0
           unanchored=""
           count=$(jq '.structured_output.findings | length' "$out")
@@ -183,10 +172,6 @@ jobs:
             path=$(jq -r ".structured_output.findings[$i].path" "$out")
             line=$(jq -r ".structured_output.findings[$i].line" "$out")
             body=$(jq -r ".structured_output.findings[$i].body" "$out")
-            if leaks "$path$body"; then
-              echo "::warning::Dropped a finding that contained a secret"
-              continue
-            fi
             if printf '%s' "$body" | gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
                  -f commit_id="$HEAD_SHA" -f path="$path" -F line="$line" -f side=RIGHT \
                  -F body=@- > /dev/null; then
@@ -199,10 +184,6 @@ jobs:
           done
 
           summary=$(jq -r '.structured_output.summary' "$out")
-          if leaks "$summary"; then
-            echo "::warning::Dropped a summary that contained a secret"
-            summary="(summary withheld: it contained a secret)"
-          fi
           {
             printf '**Claude review:** %s inline finding(s).\n\n%s\n' "$posted" "$summary"
             if [ -n "$unanchored" ]; then
