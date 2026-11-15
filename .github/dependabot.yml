@@ -10,3 +10,13 @@ updates:
       default-days: 7
     commit-message:
       prefix: "chore(dependencies): "
+
+  # Claude Code CLI used by the Claude review action (package-lock.json)
+  - package-ecosystem: "npm"
+    directory: "/.github/actions/claude-review"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(dependencies): "
