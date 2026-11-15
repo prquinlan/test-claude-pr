@@ -60,9 +60,7 @@ runs:
     - name: Install Claude Code
       if: steps.size.outputs.too-large == 'false'
       shell: bash
-      run: |
-        npm ci --prefix "$GITHUB_ACTION_PATH" --no-audit --no-fund
-        echo "$GITHUB_ACTION_PATH/node_modules/.bin" >> "$GITHUB_PATH"
+      run: npm ci --prefix "$GITHUB_ACTION_PATH" --no-audit --no-fund
 
     - name: Run Claude review
       if: steps.size.outputs.too-large == 'false'

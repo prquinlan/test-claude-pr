@@ -18,7 +18,7 @@ allow="Read(./**),Grep(./**),Glob(./**)"
 deny="Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(//tmp/**),Read(//run/**),Read(//var/**),Read(~/.*/**)"
 
 # Errors are reported from the JSON below, so don't stop on a non-zero exit here.
-claude -p "$prompt" \
+"$GITHUB_ACTION_PATH/node_modules/.bin/claude" -p "$prompt" \
   --model "$MODEL" \
   --max-turns "$MAX_TURNS" \
   --setting-sources user \
