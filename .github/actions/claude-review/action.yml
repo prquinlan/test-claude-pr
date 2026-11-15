@@ -24,9 +24,6 @@ inputs:
   max-lines:
     description: Skip PRs with more changed lines (additions + deletions) than this.
     default: "1000"
-  claude-code-version:
-    description: Claude Code CLI version to install.
-    default: 2.1.325
 
 runs:
   using: composite
@@ -58,12 +55,14 @@ runs:
           --json title,body,author,baseRefName,headRefName,files > .pr-review/pr.json
         gh pr diff "$PR_NUMBER" --repo "$REPO" > .pr-review/pr.diff
 
+    # Installs the Claude Code version pinned in package-lock.json, checking every
+    # package against its recorded checksum. Dependabot proposes updates.
     - name: Install Claude Code
       if: steps.size.outputs.too-large == 'false'
       shell: bash
-      env:
-        VERSION: ${{ inputs.claude-code-version }}
-      run: npm install -g "@anthropic-ai/claude-code@${VERSION}"
+      run: |
+        npm ci --prefix "$GITHUB_ACTION_PATH" --no-audit --no-fund
+        echo "$GITHUB_ACTION_PATH/node_modules/.bin" >> "$GITHUB_PATH"
 
     - name: Run Claude review
       if: steps.size.outputs.too-large == 'false'
