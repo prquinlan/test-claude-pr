@@ -65,34 +65,22 @@ jobs:
 
       - name: Run Claude Code Review
         if: steps.size.outputs.too-large == 'false'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          npm install -g @anthropic-ai/claude-code
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
 
-          claude -p \
-            --model claude-sonnet-4-6 \
-            --max-turns 15 \
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api repos/${REPO}/pulls/${PR_NUMBER}/comments:*)" \
-            "REPO: ${REPO}
-          PR NUMBER: ${PR_NUMBER}
-          HEAD COMMIT SHA: ${COMMIT_SHA}
+            Use `gh pr view` and `gh pr diff` to see what changed; read surrounding files only as needed.
+            Review it against REVIEW.md (and CLAUDE.md, if present).
 
-          Use \`gh pr view\` and \`gh pr diff\` to see what changed; read surrounding files only as needed.
-          Review it against REVIEW.md (and CLAUDE.md, if present).
-
-          To post concise, actionable inline comments on specific lines, run:
-          gh api repos/${REPO}/pulls/${PR_NUMBER}/comments \
-            -f body='<comment>' \
-            -f commit_id='${COMMIT_SHA}' \
-            -f path='<file_path>' \
-            -F line=<line_number> \
-            -f side='RIGHT'
-
-          Then post one PR comment with \`gh pr comment\` containing any PR-level notes
-          REVIEW.md asks for; if there are no inline findings, say so in that comment
-          so it is clear the review ran."
+            Post concise, actionable inline comments on the specific lines involved.
+            Then post one PR comment with `gh pr comment` containing any PR-level notes
+            REVIEW.md asks for; if there are no inline findings, say so in that comment
+            so it is clear the review ran.
+          claude_args: >-
+            --model claude-sonnet-5-5
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
