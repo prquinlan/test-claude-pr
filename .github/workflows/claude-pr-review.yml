@@ -65,25 +65,6 @@ jobs:
           # Don't leave the GitHub token in .git/config, where Claude could read it.
           persist-credentials: false
 
-      # Runs the Claude Code CLI directly rather than anthropics/claude-code-action:
-      # with an API key, the action's requests were rejected with "Credit balance is
-      # too low" even though the same key works when called directly.
-      - name: Use trusted review config from the base branch
-        if: steps.size.outputs.too-large == 'false'
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # The PR head is untrusted: never let it supply Claude settings, hooks,
-          # MCP servers, instructions or review standards. Use the base branch's copies.
-          paths=(.claude .claude.json .mcp.json CLAUDE.md CLAUDE.local.md REVIEW.md)
-          rm -rf "${paths[@]}"
-          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch --depth 1 origin "$BASE_REF"
-          for p in "${paths[@]}"; do
-            git checkout FETCH_HEAD -- "$p" 2>/dev/null || true
-          done
-
       # Fetch the PR here so the Claude step needs no GitHub token and no shell.
       # Comments are not fetched: anyone can post them, so they could carry injected
       # instructions.
@@ -106,6 +87,9 @@ jobs:
 
       # Claude can only read files inside the checkout. It returns findings as JSON;
       # the next step posts them.
+      # Runs the Claude Code CLI directly rather than anthropics/claude-code-action:
+      # with an API key, the action's requests were rejected with "Credit balance is
+      # too low" even though the same key works when called directly.
       - name: Run Claude Code Review
         if: steps.size.outputs.too-large == 'false'
         env:
@@ -132,6 +116,8 @@ jobs:
           EOF
           )
 
+          # --setting-sources user: ignore any .claude/settings.json in the repo, so it
+          # can't change which tools Claude may use or add hooks.
           # Read, Grep and Glob are allowed only inside the checkout; in print mode
           # anything else is refused, including symlinks that point outside it.
           # The deny list is a backstop for the places that hold secrets
@@ -142,6 +128,7 @@ jobs:
           claude -p "$prompt" \
             --model claude-sonnet-5-5 \
             --max-turns 15 \
+            --setting-sources user \
             --output-format json \
             --json-schema "$schema" \
             --allowedTools "$allow" \
