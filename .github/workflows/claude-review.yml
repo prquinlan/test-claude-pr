@@ -44,11 +44,10 @@ jobs:
           # Don't leave the GitHub token in .git/config, where Claude could read it.
           persist-credentials: false
 
-      # A ./ path resolves against the calling repo's checkout. That works here
-      # because caller and action are in the same repo; in the UoN workflows repo
-      # this must be health-informatics-uon/workflows/.github/actions/claude-review@<sha>.
+      # $/ resolves to this workflow's own repository at the commit that is running,
+      # so the action always matches the version of this workflow the caller pinned.
       - name: Claude review
-        uses: ./.github/actions/claude-review
+        uses: $/.github/actions/claude-review
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: ${{ inputs.model }}
