@@ -87,9 +87,11 @@ jobs:
 
       # Claude can only read files inside the checkout. It returns findings as JSON;
       # the next step posts them.
-      # Runs the Claude Code CLI directly rather than anthropics/claude-code-action:
-      # with an API key, the action's requests were rejected with "Credit balance is
-      # too low" even though the same key works when called directly.
+      # Runs `claude -p` directly rather than anthropics/claude-code-action. The API
+      # credits included with Claude plans cover `claude -p` run with an API key
+      # (billed as Agent SDK usage) but not the GitHub Action, which counts as
+      # Claude Code usage and fails with "Credit balance is too low".
+      # https://support.claude.com/en/articles/17154008
       - name: Run Claude Code Review
         if: steps.size.outputs.too-large == 'false'
         env:
