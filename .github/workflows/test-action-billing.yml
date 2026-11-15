@@ -1,0 +1,39 @@
+# TEMPORARY: compares claude-code-action and the Claude Code CLI with the same
+# API key, model and prompt, to confirm which one hits "Credit balance is too low".
+# Delete this file (and its branch) after the test.
+name: Test action billing
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true
+          prompt: Reply with the single word OK.
+          claude_args: --model claude-sonnet-5-5 --max-turns 1
+
+  cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: npm install -g @anthropic-ai/claude-code@2.1.325
+      - env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "Reply with the single word OK." --model claude-sonnet-5-5 \
+            --max-turns 1 --output-format json \
+            | jq '{is_error, result, total_cost_usd}'
