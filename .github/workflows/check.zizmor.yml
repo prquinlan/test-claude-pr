@@ -1,0 +1,18 @@
+# Security analysis of GitHub Actions workflows (unsafe interpolation, unpinned
+# actions, excessive permissions, ...). Findings are uploaded to code scanning:
+# Security tab, plus annotations on the PR.
+name: "Workflow Security (zizmor)"
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  zizmor:
+    uses: health-informatics-uon/workflows/.github/workflows/zizmor.yml@14803b2123feb9b45386c38b540662e610ff26b0 # v 1.8.1
+    permissions:
+      security-events: write
