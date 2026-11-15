@@ -111,7 +111,7 @@ jobs:
           - findings: one entry per issue, with the file path, the line number in the new
             version of the file (it must be a line inside the diff), and a concise,
             actionable comment.
-          - summary: the PR-level notes REVIEW.md asks for. If there are no findings,
+          - summary: a brief overview of the review. If there are no findings,
             say so, so it is clear the review ran.
           EOF
           )
@@ -125,7 +125,7 @@ jobs:
             --max-turns 15 \
             --output-format json \
             --json-schema "$schema" \
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*)" \
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*)" \
             --disallowedTools "$deny" \
             > "$RUNNER_TEMP/review.json"
 
