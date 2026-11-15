@@ -1,7 +1,5 @@
 # Review standards
 
-Used by the automated Claude PR review (`.github/workflows/claude-pr-review.yml`).
-
 ## Flag
 - Logic bugs: wrong results, off-by-one errors, unhandled edge cases (empty input, `None`, missing files).
 - Security issues: secrets in code, unsafe use of user input (shell, SQL, file paths), insecure defaults.
