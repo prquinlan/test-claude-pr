@@ -84,16 +84,32 @@ jobs:
             git checkout FETCH_HEAD -- "$p" 2>/dev/null || true
           done
 
+      # Fetch the PR here so the Claude step needs no GitHub token and no shell.
+      # Comments are not fetched: anyone can post them, so they could carry injected
+      # instructions.
+      - name: Fetch PR for review
+        if: steps.size.outputs.too-large == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          rm -rf .pr-review
+          mkdir .pr-review
+          gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json title,body,author,baseRefName,headRefName,files > .pr-review/pr.json
+          gh pr diff "$PR_NUMBER" --repo "$REPO" > .pr-review/pr.diff
+
       - name: Install Claude Code
         if: steps.size.outputs.too-large == 'false'
         run: npm install -g @anthropic-ai/claude-code@2.1.325
 
-      # Claude can only read. It returns findings as JSON; the next step posts them.
+      # Claude can only read files inside the checkout. It returns findings as JSON;
+      # the next step posts them.
       - name: Run Claude Code Review
         if: steps.size.outputs.too-large == 'false'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -103,7 +119,7 @@ jobs:
           REPO: ${REPO}
           PR NUMBER: ${PR_NUMBER}
 
-          Use "gh pr view ${PR_NUMBER}" and "gh pr diff ${PR_NUMBER}" to see what changed;
+          The PR details are in .pr-review/pr.json and the diff is in .pr-review/pr.diff;
           read surrounding files only as needed.
           Review it against REVIEW.md (and CLAUDE.md, if present).
 
@@ -116,8 +132,11 @@ jobs:
           EOF
           )
 
-          # Deny reads outside the checkout: environment variables (/proc), system and
-          # temp files, and hidden config directories in the home folder.
+          # Read, Grep and Glob are allowed only inside the checkout; in print mode
+          # anything else is refused, including symlinks that point outside it.
+          # The deny list is a backstop for the places that hold secrets
+          # (/proc/self/environ has the API key).
+          allow="Read(./**),Grep(./**),Glob(./**)"
           deny="Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(//tmp/**),Read(//run/**),Read(//var/**),Read(~/.*/**)"
 
           claude -p "$prompt" \
@@ -125,7 +144,7 @@ jobs:
             --max-turns 15 \
             --output-format json \
             --json-schema "$schema" \
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*)" \
+            --allowedTools "$allow" \
             --disallowedTools "$deny" \
             > "$RUNNER_TEMP/review.json"
 
